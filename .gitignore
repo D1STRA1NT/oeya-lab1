@@ -1,0 +1,24 @@
+# окружение и кэш Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# данные, кэш, обученные модели и журналы создаются командами проекта
+lab1/data/raw/
+lab1/data/cache/
+lab1/data/models/
+lab1/data/logs/
+
+# служебные файлы редакторов и системы
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# материалы курса
+*.pptx
+TODO.md
+Лаба 1.txt
+Матриалы.txt
+ОЕЯ Лекция 1. Введение. Морфология.pptx
