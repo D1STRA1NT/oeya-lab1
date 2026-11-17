@@ -43,8 +43,11 @@ class SuffixGuesser:
             Ничего не возвращает.
         """
         for form, tag_id, rule in pairs:
+            # для каждой формы заполняем таблицу окончаний
             for length in SUFFIX_LENGTHS:
+                # для ключа-окончанияя из 3, потом 2, потом 1 букв
                 if len(form) >= length:
+                    # добавляем пары (номер тега, правило) и сколько раз каждая встретилась
                     self.table.setdefault(form[-length:], Counter())[(tag_id, rule)] += 1
 
     def guess(self, form: str) -> tuple[int, Rule]:

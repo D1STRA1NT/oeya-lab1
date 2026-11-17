@@ -45,6 +45,19 @@ class Batch:
         )
 
 
+def sentence_length(item) -> int:
+    """Возвращает длину предложения в словах.
+
+    Args:
+        item: Подготовленное предложение или любой другой элемент списка.
+
+    Returns:
+        Число слов для подготовленного предложения, для остальных элементов единица.
+    """
+    word_ids = getattr(item, "word_ids", None)
+    return len(word_ids) if word_ids is not None else 1
+
+
 def make_batch(
     sentences: list[PreparedSentence],
     num_tags: int,
@@ -53,6 +66,7 @@ def make_batch(
     rng: random.Random,
 ) -> Batch:
     """Собирает пакет тензоров из подготовленных предложений.
+
 
     Args:
         sentences: Предложения пакета.
@@ -71,14 +85,18 @@ def make_batch(
     for sentence in sentences:
         length = len(sentence.word_ids)
         words = list(sentence.word_ids)
+        # формируем маску тегов
         cand = [[0.0] * num_tags for _ in range(length)]
         for index in range(length):
-            # скрытое слово выглядит для модели как слово, которого нет в словаре
+            # у 12% слов затирается номер слова и маска тегов
+            # чтобы для неизвестных модель опиралась на буквы и соседние слова
             if train and rng.random() < cfg.dict_drop_prob:
                 words[index] = UNK_ID
                 continue
             for tag in sentence.cand_tags[index]:
                 cand[index][tag] = 1.0
+            # еще у 10% слов затирается только номер слова
+            # чтобы для редких модель училась читать подсказку из словаря
             if train and rng.random() < cfg.word_unk_prob:
                 words[index] = UNK_ID
         pad = max_len - length
@@ -97,18 +115,6 @@ def make_batch(
         torch.tensor(lengths, dtype=torch.long),
     )
 
-
-def sentence_length(item) -> int:
-    """Возвращает длину предложения в словах.
-
-    Args:
-        item: Подготовленное предложение или любой другой элемент списка.
-
-    Returns:
-        Число слов для подготовленного предложения, для остальных элементов единица.
-    """
-    word_ids = getattr(item, "word_ids", None)
-    return len(word_ids) if word_ids is not None else 1
 
 
 def iterate_chunks(

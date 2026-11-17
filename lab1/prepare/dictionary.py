@@ -31,8 +31,13 @@ class Dictionary:
             Ничего не возвращает.
         """
         # значение формы это код пары лемма и тег или кортеж таких кодов
+        # ключ - нормализованная словоформа
+        # значение - код пары лемма и тег или кортеж таких кодов
+        # код = номер леммы * 64 + номер тега
         self.forms: dict[str, int | tuple[int, ...]] = {}
+        # список всех лемм в словаре
         self.lemma_texts: list[str] = []
+        # для проверки, есть ли уже такая лемма в словаре
         self.lemma_index: dict[str, int] = {}
 
     def __len__(self) -> int:
@@ -200,5 +205,4 @@ def build_dictionary(unimorph_path: Path | None, train: list[GoldSentence]) -> D
     if unimorph_path is not None:
         add_unimorph_entries(dictionary, unimorph_path)
         print(f"После добавления UniMorph: словоформ {len(dictionary)}")
-    dictionary.lemma_index = {}
     return dictionary

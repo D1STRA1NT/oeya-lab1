@@ -32,6 +32,7 @@ class Vocabulary:
         Returns:
             Ничего не возвращает.
         """
+        # список слов в словаре
         self.itos = itos
         # обратная таблица: по написанию слова сразу находится его номер в itos
         self.stoi = {word: index for index, word in enumerate(itos)}
@@ -108,6 +109,9 @@ def encode_suffix(word: str, suffix_len: int) -> list[int]:
 
 def case_features(token: str, index: int) -> list[float]:
     """Строит признаки регистра слова.
+    1. слово с заглавной буквы?
+    2. слово из заглавных букв?
+    3. первое слово?
 
     Args:
         token: Слово в исходном написании.
@@ -188,6 +192,7 @@ class SentenceEncoder:
             form = normalize_word(token)
             char_ids.append(encode_chars(form, self.max_chars))
             case_feats.append(case_features(token, index))
+            # скрываем словарь при оценке результатов
             if index in disabled:
                 word_ids.append(UNK_ID)
                 cand_tags.append(())

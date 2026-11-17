@@ -17,7 +17,7 @@ FORBIDDEN_SCORE = -1e4
 
 
 class TaggerNet(nn.Module):
-    """Двунаправленная рекуррентная модель частеречной разметки."""
+    """Двунаправленная Long Short-Term Memory рекуррентная модель частеречной разметки."""
 
     def __init__(self, vocab_size: int, num_tags: int, cfg: TaggerConfig) -> None:
         """Создает слои модели.
@@ -31,22 +31,32 @@ class TaggerNet(nn.Module):
             Ничего не возвращает.
         """
         super().__init__()
+        # превращает номер слова в вектор из 128
         self.word_emb = nn.Embedding(vocab_size, cfg.word_dim, padding_idx=PAD_ID)
+        # превращает номер буквы в вектор из 48 
         self.char_emb = nn.Embedding(NUM_CHARS, cfg.char_dim, padding_idx=PAD_ID)
+        # слои сверток для 24х букв по 48
+        # размером: 2, 3, 4 и 5 букв
+        # выдают по 64 признака
         self.convs = nn.ModuleList(
             [nn.Conv1d(cfg.char_dim, cfg.char_filters, kernel, padding=kernel // 2)
              for kernel in CONV_KERNELS]
         )
+        # превращает 10 чисел маски тегов в вектор из 32
         self.cand_proj = nn.Linear(num_tags, cfg.cand_dim)
+        # собираем все признаки в вектор из 420
         in_dim = (
             cfg.word_dim + cfg.char_filters * len(CONV_KERNELS)
-            + CASE_FEATURE_COUNT + cfg.cand_dim + 1
+            + CASE_FEATURE_COUNT + cfg.cand_dim + 1 # признак, что слово есть в словаре
         )
+        # обнуляет 33% от 420
         self.dropout = nn.Dropout(cfg.dropout)
+        # вектор 420 превращает в прямой и обратный LSTM 192х2=384
         self.lstm = nn.LSTM(
             in_dim, cfg.hidden_dim, num_layers=cfg.num_layers, batch_first=True,
             bidirectional=True, dropout=cfg.dropout if cfg.num_layers > 1 else 0.0,
         )
+        # превращает вектор из 384 в 10 оценок тегов
         self.out = nn.Linear(2 * cfg.hidden_dim, num_tags)
 
     def encode_chars(self, char_ids: torch.Tensor) -> torch.Tensor:
@@ -120,7 +130,7 @@ def apply_candidate_mask(logits: torch.Tensor, cand_mask: torch.Tensor) -> torch
 
 
 class LemmaRuleNet(nn.Module):
-    """Модель выбора правила лемматизации по окончанию слова и тегу."""
+    """Модель-классификатор выбора правила лемматизации по окончанию слова и тегу."""
 
     def __init__(self, num_tags: int, num_rules: int, cfg: LemmaConfig) -> None:
         """Создает слои модели.
@@ -134,16 +144,25 @@ class LemmaRuleNet(nn.Module):
             Ничего не возвращает.
         """
         super().__init__()
+        # каждую букву окончания превращает в вектор из 48
         self.char_emb = nn.Embedding(NUM_CHARS, cfg.char_dim, padding_idx=PAD_ID)
+        # номер одного из 10 тегов превращает в вектор из 24
         self.tag_emb = nn.Embedding(num_tags, cfg.tag_dim)
+        # 12 букв по 48 и тег из 24 склеиваются в вектор из 600
         in_dim = cfg.suffix_len * cfg.char_dim + cfg.tag_dim
         self.net = nn.Sequential(
+            # полносвязный слой: 600 -> 512
             nn.Linear(in_dim, cfg.hidden_dim),
+            # оставляет только положительные значения
             nn.ReLU(),
+            # обнуляет 20% из 512
             nn.Dropout(cfg.dropout),
+            # второй слой: 512 -> 512
             nn.Linear(cfg.hidden_dim, cfg.hidden_dim),
             nn.ReLU(),
+            # снова обнуляет 20%
             nn.Dropout(cfg.dropout),
+            # превращает вектор из 512 в оценки правил
             nn.Linear(cfg.hidden_dim, num_rules),
         )
 

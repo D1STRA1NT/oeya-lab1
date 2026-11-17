@@ -16,7 +16,7 @@ from .prepare.resources import load_data, load_dictionary
 from .text_utils import configure_console_utf8, read_lines, write_lines
 
 
-LOGGED_COMMANDS = {"prepare", "train", "evaluate"}
+LOGGED_COMMANDS = {"train", "evaluate"}
 
 
 class Tee:
@@ -115,7 +115,9 @@ def command_evaluate(args: argparse.Namespace) -> None:
     from .train import select_device
 
     dictionary, train, _, test = load_data()
+    # базовый метод без НС
     baseline = FrequencyBaseline.from_corpus(dictionary, train, LemmaConfig())
+    # метод на основе НС
     neural = load_lemmatizer(MODEL_PATH, dictionary, select_device())
     for rate in args.oov_rates:
         suffix = "словарь доступен" if rate == 0 else f"словарь скрыт у {rate:.0%} слов"
@@ -185,7 +187,7 @@ def command_all(args: argparse.Namespace) -> None:
     Returns:
         Ничего не возвращает.
     """
-    ensure_raw_data()
+    ensure_raw_data(force=args.force)
     command_prepare(args)
     command_train(args)
     command_evaluate(args)

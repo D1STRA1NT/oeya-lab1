@@ -133,9 +133,10 @@ def train_tagger(
     Returns:
         Обученная модель с лучшей точностью на отладочной выборке и словарь слов.
     """
-    # фиксируем генераторы, чтобы перемешивание и инициализация весов повторялись
+    # генераторы случайных чисел для перемешивания и инициализации весов
     rng = random.Random(SEED)
     torch.manual_seed(SEED)
+    
     vocab = build_vocabulary(train_sentences, cfg.word_min_freq)
     encoder = SentenceEncoder(dictionary, vocab, cfg.max_chars)
     train_prepared = prepare_sentences(encoder, train_sentences)
@@ -143,34 +144,49 @@ def train_tagger(
     print(f"Слов в словаре модели: {len(vocab)}")
 
     model = TaggerNet(len(vocab), len(TAGS), cfg).to(device)
+    # сдвигает веса после каждого батча, начальный шаг 0.002
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr)
+    # к концу обучения шаг мельче, чтобы не сбить уже найденные веса
     scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=cfg.lr_decay)
+    # функция потерь
+    # −log вероятности верного тега после softmax, среднее по батчу; паддинг и слова без тега не входят
     criterion = nn.CrossEntropyLoss(ignore_index=IGNORE_LABEL)
     best_accuracy = -1.0
     best_state = None
 
+     # обучаем 12 эпох
     for epoch in range(1, cfg.epochs + 1):
         model.train()
         total_loss = 0.0
         steps = 0
         started = time.time()
+        # делим на батчи по 64 близких по длине предложения не больше 1500 слов
         for chunk in iterate_chunks(train_prepared, cfg.batch_size, True, rng, cfg.max_batch_tokens):
+            # превращаем батч в тензоры
             batch = make_batch(chunk, len(TAGS), cfg, True, rng).to(device)
+            # если все слова в батче пропущены, то пропускаем батч
             if (batch.labels != IGNORE_LABEL).sum().item() == 0:
                 continue
+            # прогон через слои
             logits = model(
                 batch.word_ids, batch.char_ids, batch.case_feats, batch.cand_mask, batch.lengths
             )
+            # сравниваем эти оценки с верными номерами тегов из корпуса
             loss = criterion(logits.reshape(-1, len(TAGS)), batch.labels.reshape(-1))
+            # стираем поправки от прошлого пакета и считаем новые
             optimizer.zero_grad()
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+            # обновляем веса
             optimizer.step()
+            # суммируем потери и выводим среднее
             total_loss += loss.item()
             steps += 1
             if steps % PROGRESS_STEPS == 0:
                 print(f"  эпоха {epoch}, шаг {steps}, средние потери {total_loss / steps:.4f}")
+        # обновляем скорость обучения
         scheduler.step()
+        # считаем долю верных тегов на валидационном наборе
         accuracy = evaluate_tag_accuracy(model, dev_prepared, cfg, device)
         seconds = time.time() - started
         memory = torch.cuda.max_memory_allocated() // 2**20 if device.type == "cuda" else 0
@@ -200,42 +216,62 @@ def train_lemma_net(
     Returns:
         Обученная модель и список правил, номера которых она предсказывает.
     """
+    # генераторы случайных чисел для перемешивания и инициализации весов
     torch.manual_seed(SEED)
+    # получаем (лемма, тег) для словоформ
     pairs = collect_pairs(dictionary, cfg.pairs_count, SEED)
+    # отбираем правила, встречающиеся более 3 раз
     rules = build_rule_list(pairs, cfg.min_rule_count)
+    # даем праивилам номера классов
     rule_id = {rule: index for index, rule in enumerate(rules)}
     kept = [(form, tag, rule_id[rule]) for form, tag, rule in pairs if rule in rule_id]
     print(f"Примеров для обучения лемматизации: {len(kept)}, правил: {len(rules)}")
 
+    # кодируем форму, оставляем только  12 чисел полсе начала 2, либо 0 слева
     suffixes = torch.tensor(
         [encode_suffix(form, cfg.suffix_len) for form, _, _ in kept], dtype=torch.long, device=device
     )
+    # код тега
     tags = torch.tensor([tag for _, tag, _ in kept], dtype=torch.long, device=device)
+    # класс правила
     labels = torch.tensor([label for _, _, label in kept], dtype=torch.long, device=device)
 
-    # последние два процента примеров не участвуют в обучении и нужны для контроля
+    # последние два процента примеров для контроля
     valid_size = max(len(kept) // 50, 1)
     train_size = len(kept) - valid_size
     model = LemmaRuleNet(len(TAGS), len(rules), cfg).to(device)
+    # сдвигает веса после каждого батча, начальный шаг 0.002
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr)
+    # функция потерь
+    # −log вероятности верного класса после softmax, среднее по батчу; паддинг не входит
     criterion = nn.CrossEntropyLoss()
 
+    # обучаем 6 эпох
     for epoch in range(1, cfg.epochs + 1):
+        # dropout включен
         model.train()
+        # перемешиваем только обучающие примеры, последние 2% не трогаем
         order = torch.randperm(train_size, device=device)
         total_loss = 0.0
         steps = 0
+        # делим на батчи по 1024
         for start in range(0, train_size, cfg.batch_size):
             index = order[start:start + cfg.batch_size]
+            # по окончанию и тегу получаем оценки правил
             logits = model(suffixes[index], tags[index])
+            # сравниваем оценки с номером верного правила
             loss = criterion(logits, labels[index])
+            # стираем старые поправки, считаем новые и сдвигаем веса
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            # суммируем потери и выводим среднее
             total_loss += loss.item()
             steps += 1
             if steps % PROGRESS_STEPS == 0:
                 print(f"  эпоха {epoch}, шаг {steps}, средние потери {total_loss / steps:.4f}")
+        # dropout выключен; на отложенных 2% считаем долю правил,
+        # у которых наибольшая оценка совпала с верным номером
         model.eval()
         with torch.no_grad():
             logits = model(suffixes[train_size:], tags[train_size:])
@@ -278,7 +314,6 @@ def save_bundle(
         "lemma_state": {key: value.detach().cpu() for key, value in lemma_net.state_dict().items()},
         "rules": [[cut, tail] for cut, tail in rules],
         "lemma_counts": lemma_counts,
-        "tags": TAGS,
     }
     torch.save(bundle, path)
     print(f"Модель сохранена: {path}")

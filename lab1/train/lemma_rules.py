@@ -60,17 +60,23 @@ def collect_pairs(dictionary: Dictionary, count: int, seed: int) -> list[tuple[s
     Returns:
         Список троек: словоформа, номер тега и правило получения леммы.
     """
+    #бер 800 случайных слов из словаря
     rng = random.Random(seed)
     keys = list(dictionary.forms)
     chosen = keys if count >= len(keys) else rng.sample(keys, count)
     pairs: list[tuple[str, int, Rule]] = []
     for form in chosen:
+        # оставляем только слова
         if not all(char.isalpha() or char == "-" for char in form):
             continue
+        # получаем  пары(лемма, тег) для словоформы
         candidates = dictionary.lookup(form)
         if not candidates:
             continue
+        # случайно выбираем одну
         lemma, tag = candidates[rng.randrange(len(candidates))]
+        # к форме с номером тега добавляем правило:
+        # (число отрезанных у формы букв, добавленное окончание леммы)
         pairs.append((form, TAG_ID[tag], make_rule(form, normalize_word(lemma))))
     return pairs
 

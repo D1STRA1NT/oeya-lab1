@@ -22,16 +22,15 @@ PROGRESS_STEP = 20_000
 class GoldToken:
     """Слово корпуса с эталонной леммой и тегом, None означает неизвестную разметку."""
 
-    text: str
-    lemma: str | None
-    tag: str | None
+    text: str # исходное слово
+    lemma: str | None # лемма: ниж регистр, без ё
+    tag: str | None # часть речи
 
 
 @dataclass
 class GoldSentence:
-    """Предложение корпуса и номер текста, из которого оно взято."""
+    """Предложение корпуса с эталонной разметкой."""
 
-    text_id: str
     tokens: list[GoldToken]
 
 
@@ -69,6 +68,7 @@ def read_conllu_token(line: str) -> GoldToken | None:
     tag = tag_from_upos(upos)
     if tag is None:
         return GoldToken(text, None, None)
+    # если нет леммы, берем исходное слово
     lemma = columns[2] if columns[2] not in ("_", "") else text
     return GoldToken(text, normalize_word(lemma), tag)
 
@@ -83,18 +83,15 @@ def parse_conllu(path: Path) -> list[GoldSentence]:
         Список предложений с эталонной разметкой.
     """
     sentences: list[GoldSentence] = []
-    sent_id = ""
     tokens: list[GoldToken] = []
     with open_text(path) as file:
         for raw_line in file:
             line = raw_line.rstrip("\n")
             if line.startswith("#"):
-                if line.startswith("# sent_id"):
-                    sent_id = line.split("=", 1)[1].strip()
                 continue
             if not line:
                 if tokens:
-                    sentences.append(GoldSentence(sent_id, tokens))
+                    sentences.append(GoldSentence(tokens))
                     if len(sentences) % PROGRESS_STEP == 0:
                         print(f"Прочитано предложений: {len(sentences)}")
                 tokens = []
@@ -103,7 +100,7 @@ def parse_conllu(path: Path) -> list[GoldSentence]:
             if token is not None:
                 tokens.append(token)
     if tokens:
-        sentences.append(GoldSentence(sent_id, tokens))
+        sentences.append(GoldSentence(tokens))
     return sentences
 
 
@@ -122,6 +119,34 @@ def parse_corpus(paths: list[Path]) -> list[GoldSentence]:
         sentences.extend(parse_conllu(path))
     print(f"Всего предложений: {len(sentences)}")
     return sentences
+
+
+def save_corpus(parts: tuple[list[GoldSentence], ...], path: Path) -> None:
+    """Сохраняет разобранные части корпуса в файл кэша.
+
+    Args:
+        parts: Кортеж списков предложений: обучение, отладка и тест.
+        path: Путь к файлу кэша.
+
+    Returns:
+        Ничего не возвращает.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "wb") as file:
+        pickle.dump(parts, file, protocol=pickle.HIGHEST_PROTOCOL)
+
+
+def load_corpus_cache(path: Path) -> tuple[list[GoldSentence], ...]:
+    """Загружает разобранные части корпуса из файла кэша.
+
+    Args:
+        path: Путь к файлу кэша.
+
+    Returns:
+        Кортеж списков предложений: обучение, отладка и тест.
+    """
+    with open(path, "rb") as file:
+        return pickle.load(file)
 
 
 def lemma_key(form: str, lemma: str, tag: str) -> str:
@@ -173,30 +198,3 @@ def count_tags(sentences: list[GoldSentence]) -> dict[str, int]:
                 counts[token.tag] = counts.get(token.tag, 0) + 1
     return counts
 
-
-def save_corpus(parts: tuple[list[GoldSentence], ...], path: Path) -> None:
-    """Сохраняет разобранные части корпуса в файл кэша.
-
-    Args:
-        parts: Кортеж списков предложений: обучение, отладка и тест.
-        path: Путь к файлу кэша.
-
-    Returns:
-        Ничего не возвращает.
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "wb") as file:
-        pickle.dump(parts, file, protocol=pickle.HIGHEST_PROTOCOL)
-
-
-def load_corpus_cache(path: Path) -> tuple[list[GoldSentence], ...]:
-    """Загружает разобранные части корпуса из файла кэша.
-
-    Args:
-        path: Путь к файлу кэша.
-
-    Returns:
-        Кортеж списков предложений: обучение, отладка и тест.
-    """
-    with open(path, "rb") as file:
-        return pickle.load(file)
